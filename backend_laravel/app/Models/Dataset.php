@@ -8,6 +8,7 @@ class Dataset extends Model
 {
     protected $fillable = [
         'user_id',
+        'project_id',
         'name',
         'original_filename',
         'file_path',
@@ -24,4 +25,11 @@ class Dataset extends Model
     {
         return $this->belongsTo(User::class);
     }
+
+    public function project()
+{
+    return $this->belongsTo(Project::class);
+}
+
+
 }
