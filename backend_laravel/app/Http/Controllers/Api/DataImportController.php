@@ -14,7 +14,8 @@ class DataImportController extends Controller
     {
         $request->validate([
             'file' => 'required|file|mimes:csv,txt,xlsx|max:10240',
-            'name' => 'required|string|max:255'
+            'name' => 'required|string|max:255',
+            'project_id' => 'required|exists:projects,id' // 👈 validation du projet
         ]);
 
         $file = $request->file('file');
@@ -30,10 +31,10 @@ class DataImportController extends Controller
                 'message' => 'Failed to store the file'
             ], 500);
         }
-        
 
         $dataset = Dataset::create([
             'user_id' => auth()->id(),
+            'project_id' => $request->project_id, // 👈 association au projet
             'name' => $request->name,
             'original_filename' => $originalName,
             'file_path' => $path,
