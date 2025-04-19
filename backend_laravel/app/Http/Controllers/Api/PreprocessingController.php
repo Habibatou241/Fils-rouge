@@ -6,9 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\Preprocessing;
 use App\Models\Dataset;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Process\Exception\ProcessFailedException;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Log;
 
 class PreprocessingController extends Controller
 {
@@ -21,12 +22,10 @@ class PreprocessingController extends Controller
      */
     public function applyPreprocessing(Request $request, int $dataset_id): JsonResponse
     {
-        // Validate the preprocessing type
         $request->validate([
-            'type' => 'required|string', // Type of preprocessing (e.g., 'cleaning', 'scaling')
+            'type' => 'required|string',
         ]);
 
-        // Retrieve the dataset and ensure the user is authorized
         $dataset = Dataset::where('id', $dataset_id)
                           ->where('user_id', auth()->id())
                           ->first();
@@ -38,37 +37,53 @@ class PreprocessingController extends Controller
             ], 404);
         }
 
-        // Prepare the file path for processing
-        $filePath = storage_path('app/' . $dataset->file_path);
+        $filePath = storage_path('app/private/' . $dataset->file_path);
 
-        // Call the Python script to apply preprocessing
         try {
-            // Run the Python script with the file path and preprocessing type
-            $process = new Process(['python3', base_path('ml-python/preprocessing_script.py'), $filePath, $request->type]);
-            $process->mustRun();
+            $process = new Process(['python', base_path('ml_python/preprocessing_script.py'), $filePath, $request->type]);
+            $process->run();
 
-            // Get the output from the Python script
             $output = $process->getOutput();
-            $result = json_decode($output, true); // Assuming the script returns JSON output
+            $errorOutput = $process->getErrorOutput();
 
-            // Save the preprocessing result in the database
+            $result = json_decode($output, true);
+
+            if (!$process->isSuccessful() || !is_array($result)) {
+                $errorMessage = 'Une erreur est survenue pendant le prétraitement.';
+
+                $errorData = json_decode($errorOutput, true);
+                if (is_array($errorData) && isset($errorData['error'])) {
+                    $errorMessage = $errorData['error'];
+                }
+
+                Log::error('Erreur dans le script Python : ' . $errorMessage);
+
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $errorMessage
+                ], 500, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            }
+
             $preprocessing = Preprocessing::create([
                 'dataset_id' => $dataset->id,
                 'name' => $request->type,
-                'file_path' => $result['file_path'], // Path to the resulting file
-                'summary' => json_encode($result['summary']), // Summary statistics
+                'file_path' => $result['file_path'],
+                'summary' => json_encode($result['summary'], JSON_UNESCAPED_UNICODE),
             ]);
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Preprocessing applied successfully',
                 'preprocessing' => $preprocessing
-            ]);
+            ], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+
         } catch (ProcessFailedException $exception) {
+            Log::error('Exception lors de l’exécution du script Python : ' . $exception->getMessage());
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error applying preprocessing: ' . $exception->getMessage()
-            ], 500);
+                'message' => 'Erreur d’exécution du script : ' . $exception->getMessage()
+            ], 500, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         }
     }
 
@@ -80,7 +95,6 @@ class PreprocessingController extends Controller
      */
     public function getPreprocessingHistoryByDataset(int $dataset_id): JsonResponse
     {
-        // Check if the dataset belongs to the authenticated user
         $dataset = Dataset::where('id', $dataset_id)
                           ->where('user_id', auth()->id())
                           ->first();
@@ -92,7 +106,6 @@ class PreprocessingController extends Controller
             ], 404);
         }
 
-        // Retrieve the preprocessing history for this dataset
         $preprocessings = Preprocessing::where('dataset_id', $dataset_id)->get();
 
         return response()->json([
@@ -108,7 +121,6 @@ class PreprocessingController extends Controller
      */
     public function getAllPreprocessings(): JsonResponse
     {
-        // Retrieve all preprocessings for the authenticated user
         $preprocessings = Preprocessing::whereHas('dataset', function ($query) {
             $query->where('user_id', auth()->id());
         })->get();
