@@ -40,8 +40,9 @@ class PreprocessingController extends Controller
 
             $command = [$pythonPath, $scriptPath, $datasetPath, $request->type];
 
-            if (in_array($request->type, ['fill', 'scaling'])) {
-                if (!$request->has('method')) {
+            // Correction ici pour accepter "outliers" et "remove_outliers"
+            if (in_array($request->type, ['fill', 'scaling', 'remove_duplicates', 'outliers'])) {
+                if (!$request->has('method') && in_array($request->type, ['fill', 'scaling', 'outliers'])) {
                     Log::error('[PREPROCESSING] Missing method parameter for type: ' . $request->type);
                     return response()->json([
                         'status' => 'error',
@@ -53,9 +54,13 @@ class PreprocessingController extends Controller
                     $request->validate(['method' => 'required|string|in:mean,median,mode']);
                 } elseif ($request->type === 'scaling') {
                     $request->validate(['method' => 'required|string|in:normalization,standardization']);
+                } elseif ($request->type === 'outliers') {
+                    $request->validate(['method' => 'required|string|in:iqr,zscore']);
                 }
 
-                $command[] = $request->method;
+                if ($request->has('method')) {
+                    $command[] = $request->method;
+                }
             }
 
             Log::info('[PREPROCESSING] Executing command: ' . implode(' ', $command));
@@ -101,7 +106,7 @@ class PreprocessingController extends Controller
 
             $preprocessing = Preprocessing::create([
                 'dataset_id' => $dataset->id,
-                'name' => $request->type . ($request->has('method') ? ' (' . $request->method . ')' : ''),
+                'name' => ucfirst(str_replace('_', ' ', $request->type)) . ($request->has('method') ? ' (' . $request->method . ')' : ''),
                 'file_path' => $result['file_path'],
                 'summary' => json_encode($result['summary'], JSON_UNESCAPED_UNICODE),
             ]);

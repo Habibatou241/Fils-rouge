@@ -37,6 +37,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/analyses', [DataAnalysisController::class, 'index']);
     Route::get('/analyses/{id}', [DataAnalysisController::class, 'show']);
     Route::post('/analyze/{preprocessing_id}', [DataAnalysisController::class, 'analyze']);
+    
 });
 
 

@@ -3,6 +3,7 @@ import json
 import sys
 import os
 import numpy as np
+from scipy import stats  # Ajouté pour Z-Score
 
 def convert_numpy(obj):
     if isinstance(obj, (np.integer, np.floating)):
@@ -68,7 +69,6 @@ def apply_scaling(file_path, method):
                     df_scaled[col] = 0
                 else:
                     df_scaled[col] = (df[col] - min_val) / (max_val - min_val)
-
         elif method == "standardization":
             for col in numeric_cols:
                 mean = df[col].mean()
@@ -94,6 +94,58 @@ def apply_scaling(file_path, method):
     except Exception as e:
         raise Exception(f"Scaling error: {str(e)}")
 
+def remove_duplicates(file_path):
+    try:
+        df = pd.read_csv(file_path)
+        initial_shape = df.shape
+        df_no_duplicates = df.drop_duplicates()
+        summary = {
+            "initial_shape": initial_shape,
+            "cleaned_shape": df_no_duplicates.shape,
+            "duplicates_removed": initial_shape[0] - df_no_duplicates.shape[0]
+        }
+        output_path = file_path.replace(".csv", "_deduplicated.csv")
+        df_no_duplicates.to_csv(output_path, index=False)
+        return {"file_path": output_path, "summary": summary}
+    except Exception as e:
+        raise Exception(f"Duplicate removal error: {str(e)}")
+
+def remove_outliers(file_path, method):
+    try:
+        df = pd.read_csv(file_path)
+        numeric_cols = df.select_dtypes(include='number').columns.tolist()
+
+        if not numeric_cols:
+            raise ValueError("No numeric columns found for outlier detection.")
+
+        df_cleaned = df.copy()
+
+        if method == "zscore":
+            z_scores = np.abs(stats.zscore(df[numeric_cols]))
+            mask = (z_scores < 3).all(axis=1)
+            df_cleaned = df[mask]
+        elif method == "iqr":
+            Q1 = df[numeric_cols].quantile(0.25)
+            Q3 = df[numeric_cols].quantile(0.75)
+            IQR = Q3 - Q1
+            mask = ~((df[numeric_cols] < (Q1 - 1.5 * IQR)) | (df[numeric_cols] > (Q3 + 1.5 * IQR))).any(axis=1)
+            df_cleaned = df[mask]
+        else:
+            raise ValueError("Invalid outlier method. Use 'zscore' or 'iqr'.")
+
+        summary = {
+            "original_shape": df.shape,
+            "cleaned_shape": df_cleaned.shape,
+            "rows_removed": df.shape[0] - df_cleaned.shape[0],
+            "method": method
+        }
+
+        output_path = file_path.replace(".csv", f"_outliers_{method}.csv")
+        df_cleaned.to_csv(output_path, index=False)
+        return {"file_path": output_path, "summary": summary}
+    except Exception as e:
+        raise Exception(f"Outlier removal error: {str(e)}")
+
 def main():
     try:
         if len(sys.argv) < 3:
@@ -116,6 +168,12 @@ def main():
             if not method:
                 raise Exception("Scaling method is required (normalization, standardization).")
             result = apply_scaling(file_path, method)
+        elif preprocess_type == "duplicates":
+            result = remove_duplicates(file_path)
+        elif preprocess_type == "outliers":
+            if not method:
+                raise Exception("Outlier method is required (zscore, iqr).")
+            result = remove_outliers(file_path, method)
         else:
             raise Exception("Invalid preprocessing type")
 
