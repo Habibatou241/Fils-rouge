@@ -35,7 +35,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="C:\Users\HP ELITEBOOK 1030 G2\fils_rouge\ml_python\venv"
+VIRTUAL_ENV="C:\Users\HP ELITEBOOK 1030 G2\fils_rouge\backend_laravel\ml_python\venv"
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
