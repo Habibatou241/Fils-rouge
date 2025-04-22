@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DataImportController;
 use App\Http\Controllers\Api\ProjectController;
 use App\Http\Controllers\Api\PreprocessingController;
+
+use App\Http\Controllers\Api\DataAnalysisController;
 use Illuminate\Support\Facades\Route;
 
 // Public routes
@@ -30,4 +32,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/datasets/{dataset_id}/preprocessing', [PreprocessingController::class, 'applyPreprocessing']);
     Route::get('/datasets/{dataset_id}/preprocessing', [PreprocessingController::class, 'getPreprocessingHistoryByDataset']);
     Route::get('/preprocessings', [PreprocessingController::class, 'getAllPreprocessings']);
+
+    // Data Analysis routes
+    Route::get('/analyses', [DataAnalysisController::class, 'index']);
+    Route::get('/analyses/{id}', [DataAnalysisController::class, 'show']);
+    Route::post('/analyze/{preprocessing_id}', [DataAnalysisController::class, 'analyze']);
 });
+
+

@@ -24,4 +24,9 @@ class Preprocessing extends Model
     {
         return $this->belongsTo(Dataset::class);
     }
+
+    public function analysis()
+    {
+        return $this->hasOne(Analysis::class);
+    }
 }

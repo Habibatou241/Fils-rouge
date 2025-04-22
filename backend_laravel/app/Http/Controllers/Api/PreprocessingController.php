@@ -13,17 +13,11 @@ use Illuminate\Support\Facades\Log;
 
 class PreprocessingController extends Controller
 {
-    /**
-     * Apply preprocessing to a dataset.
-     *
-     * @param Request $request
-     * @param int $dataset_id
-     * @return JsonResponse
-     */
     public function applyPreprocessing(Request $request, int $dataset_id): JsonResponse
     {
         $request->validate([
             'type' => 'required|string',
+            'method' => 'nullable|string'
         ]);
 
         $dataset = Dataset::where('id', $dataset_id)
@@ -37,36 +31,77 @@ class PreprocessingController extends Controller
             ], 404);
         }
 
-        $filePath = storage_path('app/private/' . $dataset->file_path);
+        $datasetPath = storage_path('app/private/' . $dataset->file_path);
+        Log::debug('[PREPROCESSING] Dataset file path: ' . $datasetPath);
 
         try {
-            $process = new Process(['python', base_path('ml_python/preprocessing_script.py'), $filePath, $request->type]);
+            $pythonPath = base_path('ml_python/venv/Scripts/python.exe');
+            $scriptPath = base_path('ml_python/preprocessing_script.py');
+
+            $command = [$pythonPath, $scriptPath, $datasetPath, $request->type];
+
+            if (in_array($request->type, ['fill', 'scaling'])) {
+                if (!$request->has('method')) {
+                    Log::error('[PREPROCESSING] Missing method parameter for type: ' . $request->type);
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'The "method" parameter is required for this preprocessing type.'
+                    ], 400);
+                }
+
+                if ($request->type === 'fill') {
+                    $request->validate(['method' => 'required|string|in:mean,median,mode']);
+                } elseif ($request->type === 'scaling') {
+                    $request->validate(['method' => 'required|string|in:normalization,standardization']);
+                }
+
+                $command[] = $request->method;
+            }
+
+            Log::info('[PREPROCESSING] Executing command: ' . implode(' ', $command));
+
+            $process = new Process($command);
             $process->run();
 
             $output = $process->getOutput();
             $errorOutput = $process->getErrorOutput();
 
+            Log::debug('[PREPROCESSING] Python stdout: ' . $output);
+            Log::debug('[PREPROCESSING] Python stderr: ' . $errorOutput);
+
             $result = json_decode($output, true);
 
-            if (!$process->isSuccessful() || !is_array($result)) {
-                $errorMessage = 'Une erreur est survenue pendant le prétraitement.';
+            if (!$process->isSuccessful()) {
+                Log::error('[PREPROCESSING] Process failed with exit code ' . $process->getExitCode());
 
+                if (!empty($errorOutput)) {
+                    Log::error('[PREPROCESSING] Raw stderr: ' . $errorOutput);
+                }
+
+                $errorMessage = 'Une erreur est survenue pendant le prétraitement.';
                 $errorData = json_decode($errorOutput, true);
+
                 if (is_array($errorData) && isset($errorData['error'])) {
                     $errorMessage = $errorData['error'];
                 }
 
-                Log::error('Erreur dans le script Python : ' . $errorMessage);
-
                 return response()->json([
                     'status' => 'error',
                     'message' => $errorMessage
-                ], 500, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+                ], 500);
+            }
+
+            if (!is_array($result)) {
+                Log::error('[PREPROCESSING] Output JSON could not be decoded. Raw output: ' . $output);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Invalid JSON output from Python script.'
+                ], 500);
             }
 
             $preprocessing = Preprocessing::create([
                 'dataset_id' => $dataset->id,
-                'name' => $request->type,
+                'name' => $request->type . ($request->has('method') ? ' (' . $request->method . ')' : ''),
                 'file_path' => $result['file_path'],
                 'summary' => json_encode($result['summary'], JSON_UNESCAPED_UNICODE),
             ]);
@@ -75,24 +110,23 @@ class PreprocessingController extends Controller
                 'status' => 'success',
                 'message' => 'Preprocessing applied successfully',
                 'preprocessing' => $preprocessing
-            ], 200, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+            ], 200);
 
-        } catch (ProcessFailedException $exception) {
-            Log::error('Exception lors de l’exécution du script Python : ' . $exception->getMessage());
-
+        } catch (ProcessFailedException $e) {
+            Log::error('[PREPROCESSING] ProcessFailedException: ' . $e->getMessage());
             return response()->json([
                 'status' => 'error',
-                'message' => 'Erreur d’exécution du script : ' . $exception->getMessage()
-            ], 500, [], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+                'message' => 'Erreur d’exécution du script : ' . $e->getMessage()
+            ], 500);
+        } catch (\Throwable $e) {
+            Log::critical('[PREPROCESSING] Unexpected exception: ' . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Erreur inattendue : ' . $e->getMessage()
+            ], 500);
         }
     }
 
-    /**
-     * Get preprocessing history for a specific dataset.
-     *
-     * @param int $dataset_id
-     * @return JsonResponse
-     */
     public function getPreprocessingHistoryByDataset(int $dataset_id): JsonResponse
     {
         $dataset = Dataset::where('id', $dataset_id)
@@ -114,11 +148,6 @@ class PreprocessingController extends Controller
         ]);
     }
 
-    /**
-     * Get all preprocessings for the authenticated user.
-     *
-     * @return JsonResponse
-     */
     public function getAllPreprocessings(): JsonResponse
     {
         $preprocessings = Preprocessing::whereHas('dataset', function ($query) {
